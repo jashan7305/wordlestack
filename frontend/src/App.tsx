@@ -37,6 +37,7 @@ function Header({ user, onLogout }: { user: User | null; onLogout: () => void })
 
 export function GamePage({ user }: { user: User | null }) {
   const [game, setGame] = useState<Game | null>(null)
+  const [revealedAttempt, setRevealedAttempt] = useState<number | null>(null)
   const [current, setCurrent] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
@@ -58,7 +59,7 @@ export function GamePage({ user }: { user: User | null }) {
     setBusy(true); setNotice(''); setGuessErr('')
     try {
       const updated = await api<Game>('/games/today/guess', { method: 'POST', body: JSON.stringify({ guess: current }) })
-      setGame(updated); setCurrent('')
+      setGame(updated); setCurrent(''); setRevealedAttempt(updated.attempts)
       if (updated.status === 'won') setNotice('Excellent!')
       else if (updated.status === 'lost') setNotice(`The word was ${updated.answer?.toUpperCase() ?? ''}`)
     } catch (error) {
@@ -114,7 +115,8 @@ export function GamePage({ user }: { user: User | null }) {
         const guess = submitted[row]
         const letter = guess?.word[col] ?? (row === submitted.length ? current[col] : '') ?? ''
         const result = guess?.result[col]
-        return <div key={`${row}-${col}`} className={`tile ${result ? `tile-${result.toLowerCase()}` : letter ? 'tile-filled' : ''}`} aria-label={letter ? `Row ${row + 1} letter ${col + 1}: ${letter}` : `Row ${row + 1} letter ${col + 1}`}>
+        const revealing = revealedAttempt === row + 1
+        return <div key={`${row}-${col}`} className={`tile ${result ? `tile-${result.toLowerCase()}` : letter ? 'tile-filled' : ''} ${revealing ? `tile-reveal tile-reveal-${col}` : ''}`} aria-label={letter ? `Row ${row + 1} letter ${col + 1}: ${letter}` : `Row ${row + 1} letter ${col + 1}`}>
           {letter?.toUpperCase() ?? ''}
         </div>
       })}
@@ -136,6 +138,39 @@ function StatisticsDialog({ close }: { close: () => void }) {
   return <Dialog title="Statistics" close={close}><div className="stats-grid">{['games_played', 'games_won', 'win_percentage', 'current_streak', 'longest_streak', 'total_points'].map((key) => <div key={key}><strong>{String(stats.data?.[key] ?? '—')}</strong><span>{key.replaceAll('_', ' ')}</span></div>)}</div></Dialog>
 }
 
+export function GuessDistribution({ value }: { value: Record<string, unknown> }) {
+  const rows = Object.entries(value).sort(([left], [right]) => Number(left) - Number(right))
+  const maximum = Math.max(1, ...rows.map(([, count]) => Number(count) || 0))
+  return <div className="guess-distribution" aria-label="Guess distribution">
+    {rows.map(([guessCount, count]) => {
+      const total = Number(count) || 0
+      return <div className="guess-row" key={guessCount}>
+        <span className="guess-label">{guessCount}</span>
+        <div className="guess-track"><span className={`guess-bar ${total === maximum && total > 0 ? 'guess-bar-best' : ''}`} style={{ width: `${total ? Math.max(8, total / maximum * 100) : 0}%` }}>{total}</span></div>
+      </div>
+    })}
+  </div>
+}
+
+export function TableValue({ column, value }: { column: string; value: unknown }) {
+  if (column === 'rank' || column === 'position') return <span className="rank-tile">{String(value ?? '—')}</span>
+  if (column === 'status') {
+    const status = String(value ?? 'unknown').toLowerCase().replaceAll('_', '-')
+    return <span className={`result-tag result-${status}`}>{String(value ?? '—').replaceAll('_', ' ')}</span>
+  }
+  if (column === 'total_points' || column === 'points') return <strong className="points-cell">{String(value ?? '0')}</strong>
+  if (column === 'guess_distribution') {
+    let distribution = value
+    if (typeof distribution === 'string') {
+      try { distribution = JSON.parse(distribution) as unknown } catch { /* fall through to plain text */ }
+    }
+    if (distribution && typeof distribution === 'object' && !Array.isArray(distribution))
+      return <GuessDistribution value={distribution as Record<string, unknown>} />
+  }
+  if (value !== null && typeof value === 'object') return JSON.stringify(value)
+  return String(value ?? '—')
+}
+
 function AuthPage({ mode, onAuth }: { mode: 'login' | 'register'; onAuth: (u: User) => void }) {
   const [username, setUsername] = useState(''); const [password, setPassword] = useState(''); const [error, setError] = useState('')
   const navigate = useNavigate()
@@ -154,7 +189,41 @@ function DataPage({ title, endpoint }: { title: string; endpoint: string }) {
   const items = result.data
   const records = Array.isArray(items) ? items : typeof items === 'object' && items !== null && 'items' in items && Array.isArray(items.items) ? items.items : null
   const columns = records?.[0] && typeof records[0] === 'object' ? Object.keys(records[0]) : []
-  return <main className="page"><h1>{title}</h1>{result.isLoading ? <p>Loading…</p> : result.error ? <p className="error-text">{result.error.message}</p> : records?.length ? <div className="table-scroll"><table><thead><tr>{columns.map((key) => <th key={key}>{key.replaceAll('_', ' ')}</th>)}</tr></thead><tbody>{records.map((record, index) => { const value = record as Record<string, unknown>; return <tr key={index}>{columns.map((key) => <td key={key}>{title === 'Leagues' && key === 'name' ? <Link to={`/leagues/${String(value.id)}`}>{String(value.name)}</Link> : String(value[key] ?? '—')}</td>)}</tr> })}</tbody></table></div> : records ? <p>No results yet.</p> : typeof items === 'object' && items !== null ? <dl className="data-list">{Object.entries(items).map(([key, value]) => <div key={key}><dt>{key.replaceAll('_', ' ')}</dt><dd>{String(value ?? '—')}</dd></div>)}</dl> : <p>No results yet.</p>}</main>
+  return <main className="page"><h1>{title}</h1>{result.isLoading ? <p>Loading…</p> : result.error ? <p className="error-text">{result.error.message}</p> : records?.length ? <div className="table-scroll"><table className="data-table"><thead><tr>{columns.map((key) => <th key={key}>{key.replaceAll('_', ' ')}</th>)}</tr></thead><tbody>{records.map((record, index) => { const value = record as Record<string, unknown>; return <tr key={index}>{columns.map((key) => <td key={key}>{title === 'Leagues' && key === 'name' ? <Link to={`/leagues/${String(value.id)}`}>{String(value.name)}</Link> : <TableValue column={key} value={value[key]} />}</td>)}</tr> })}</tbody></table></div> : records ? <p>No results yet.</p> : typeof items === 'object' && items !== null ? <dl className="data-list">{Object.entries(items).map(([key, value]) => <div key={key}><dt>{key.replaceAll('_', ' ')}</dt><dd>{key === 'guess_distribution' && value && typeof value === 'object' ? <GuessDistribution value={value as Record<string, unknown>} /> : <TableValue column={key} value={value} />}</dd></div>)}</dl> : <p>No results yet.</p>}</main>
+}
+
+function StatisticsPage() {
+  const stats = useQuery({ queryKey: ['stats', 'me'], queryFn: () => api<Record<string, unknown>>('/stats/me'), retry: false })
+  const history = useQuery({ queryKey: ['/games/history'], queryFn: () => api<{ items: Record<string, unknown>[] }>('/games/history'), retry: false })
+  const values = stats.data
+  const metrics: [string, unknown][] = [
+    ['Games played', values?.games_played],
+    ['Win rate', values?.win_percentage === undefined ? undefined : `${String(values.win_percentage)}%`],
+    ['Current streak', values?.current_streak],
+    ['Best streak', values?.longest_streak],
+    ['Average guesses', values?.average_guesses],
+    ['Total points', values?.total_points],
+  ]
+  return <main className="page stats-page">
+    <h1>Statistics</h1>
+    {stats.isLoading ? <p>Loading…</p> : stats.error ? <p className="error-text">{stats.error.message}</p> : <>
+      <section className="stat-summary" aria-label="Your game statistics">
+        {metrics.map(([label, value], index) => <div className={`stat-metric stat-metric-${index % 3}`} key={label}>
+          <strong>{String(value ?? '—')}</strong><span>{label}</span>
+        </div>)}
+      </section>
+      <section className="stats-section"><h2>Guess distribution</h2>
+        {values?.guess_distribution && typeof values.guess_distribution === 'object'
+          ? <GuessDistribution value={values.guess_distribution as Record<string, unknown>} />
+          : <p>No completed games yet.</p>}
+      </section>
+      <section className="stats-section"><h2>Game history</h2>
+        {history.isLoading ? <p>Loading…</p> : history.error ? <p className="error-text">{history.error.message}</p> : history.data?.items.length
+          ? <div className="table-scroll"><table className="data-table"><thead><tr><th>Date</th><th>Result</th><th>Guesses</th><th>Points</th></tr></thead><tbody>{history.data.items.map((game) => <tr key={String(game.id)}><td>{String(game.date)}</td><td><TableValue column="status" value={game.status} /></td><td>{String(game.attempts)}</td><td><TableValue column="points" value={game.points} /></td></tr>)}</tbody></table></div>
+          : <p>No games played yet.</p>}
+      </section>
+    </>}
+  </main>
 }
 
 function LeaguePage({ user }: { user: User | null }) {
@@ -165,7 +234,7 @@ function LeaguePage({ user }: { user: User | null }) {
   const [overall, setOverall] = useState<unknown[]>([])
   const [error, setError] = useState('')
   useEffect(() => { if (!user) return; void Promise.all([api<{ name: string; description: string }>(`/leagues/${id}`), api<{ played: unknown[]; not_played: unknown[] }>(`/leagues/${id}/leaderboard/daily`), api<unknown[]>(`/leagues/${id}/leaderboard/overall`)]).then(([info, day, total]) => { setLeague(info); setDaily(day.played); setNotPlayed(day.not_played); setOverall(total) }).catch((e: Error) => setError(e.message)) }, [id, user])
-  const table = (rows: unknown[]) => rows.length ? <div className="table-scroll"><table><thead><tr>{Object.keys(rows[0] as object).map((key) => <th key={key}>{key.replaceAll('_', ' ')}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index}>{Object.entries(row as Record<string, unknown>).map(([key, value]) => <td key={key}>{String(value ?? '—')}</td>)}</tr>)}</tbody></table></div> : <p>No games yet.</p>
+  const table = (rows: unknown[]) => rows.length ? <div className="table-scroll"><table className="data-table"><thead><tr>{Object.keys(rows[0] as object).map((key) => <th key={key}>{key.replaceAll('_', ' ')}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index}>{Object.entries(row as Record<string, unknown>).map(([key, value]) => <td key={key}><TableValue column={key} value={value} /></td>)}</tr>)}</tbody></table></div> : <p>No games yet.</p>
   return <main className="page"><p><Link to="/leagues">Leagues</Link></p><h1>{league?.name ?? 'League'}</h1><p>{league?.description}</p>{error && <p className="error-text">{error}</p>}<h2>Today</h2>{table(daily)}{notPlayed.length > 0 && <><h3>Not played</h3>{table(notPlayed)}</>}<h2>Overall</h2>{table(overall)}</main>
 }
 
@@ -179,7 +248,7 @@ function AdminPage() {
   const archive = async (league: typeof leagues[number]) => { try { await api(`/admin/leagues/${league.id}`, { method: 'PATCH', body: JSON.stringify({ ...league, archived: !league.archived }) }); refresh() } catch (e) { setError(e instanceof Error ? e.message : 'Could not update League') } }
   const addMember = async (leagueId: number, userId: number) => { try { await api(`/admin/leagues/${leagueId}/members`, { method: 'POST', body: JSON.stringify({ user_id: userId }) }); setError('Member added') } catch (e) { setError(e instanceof Error ? e.message : 'Could not add member') } }
   const invite = async (leagueId: number) => { try { const result = await api<{ url: string }>(`/admin/leagues/${leagueId}/invitations`, { method: 'POST' }); await navigator.clipboard.writeText(result.url.startsWith('http') ? result.url : `${window.location.origin}${result.url}`); setError('Invitation link copied') } catch (e) { setError(e instanceof Error ? e.message : 'Could not create invitation') } }
-  return <main className="page"><h1>Administration</h1><p><Link to="/admin/users">Manage users</Link></p><h2>Create a League</h2><form className="admin-form" onSubmit={(event) => void create(event)}><input aria-label="League name" placeholder="League name" minLength={2} maxLength={80} value={name} onChange={(event) => setName(event.target.value)} required /><input aria-label="Description" placeholder="Description" value={description} onChange={(event) => setDescription(event.target.value)} /><button className="primary-button">Create League</button></form>{error && <p className="error-text">{error}</p>}<h2>Leagues</h2><div className="table-scroll"><table><thead><tr><th>Name</th><th>Description</th><th>Status</th><th>Add member</th><th>Invitation</th><th>Action</th></tr></thead><tbody>{leagues.map((league) => <tr key={league.id}><td>{league.name}</td><td>{league.description}</td><td>{league.archived ? 'Archived' : 'Active'}</td><td><select aria-label={`Add member to ${league.name}`} defaultValue="" onChange={(event) => { if (event.target.value) void addMember(league.id, Number(event.target.value)) }}><option value="">Choose a user</option>{users.map((person) => <option key={person.id} value={person.id}>{person.username}</option>)}</select></td><td><button className="text-button" onClick={() => void invite(league.id)}>Create link</button></td><td><button className="text-button" onClick={() => void archive(league)}>{league.archived ? 'Restore' : 'Archive'}</button></td></tr>)}</tbody></table></div></main>
+  return <main className="page"><h1>Administration</h1><p><Link to="/admin/users">Manage users</Link></p><h2>Create a League</h2><form className="admin-form" onSubmit={(event) => void create(event)}><input aria-label="League name" placeholder="League name" minLength={2} maxLength={80} value={name} onChange={(event) => setName(event.target.value)} required /><input aria-label="Description" placeholder="Description" value={description} onChange={(event) => setDescription(event.target.value)} /><button className="primary-button">Create League</button></form>{error && <p className="error-text">{error}</p>}<h2>Leagues</h2><div className="table-scroll"><table className="data-table admin-table"><thead><tr><th>Name</th><th>Description</th><th>Status</th><th>Add member</th><th>Invitation</th><th>Action</th></tr></thead><tbody>{leagues.map((league) => <tr key={league.id}><td>{league.name}</td><td>{league.description}</td><td><TableValue column="status" value={league.archived ? 'archived' : 'active'} /></td><td><select aria-label={`Add member to ${league.name}`} defaultValue="" onChange={(event) => { if (event.target.value) void addMember(league.id, Number(event.target.value)) }}><option value="">Choose a user</option>{users.map((person) => <option key={person.id} value={person.id}>{person.username}</option>)}</select></td><td><button className="text-button" onClick={() => void invite(league.id)}>Create link</button></td><td><button className="text-button" onClick={() => void archive(league)}>{league.archived ? 'Restore' : 'Archive'}</button></td></tr>)}</tbody></table></div></main>
 }
 
 function AdminUsersPage() {
@@ -188,7 +257,7 @@ function AdminUsersPage() {
   const refresh = () => { void api<{ items: typeof rows }>('/admin/users').then((data) => setRows(data.items)).catch((e: Error) => setError(e.message)) }
   useEffect(() => { refresh() }, [])
   const update = async (row: typeof rows[number], change: { active?: boolean; role?: 'USER' | 'ADMIN' }) => { try { await api(`/admin/users/${row.id}`, { method: 'PATCH', body: JSON.stringify(change) }); refresh() } catch (e) { setError(e instanceof Error ? e.message : 'Could not update account') } }
-  return <main className="page"><p><Link to="/admin">Administration</Link></p><h1>Users</h1>{error && <p className="error-text">{error}</p>}<div className="table-scroll"><table><thead><tr><th>Username</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td>{row.username}</td><td>{row.role}</td><td>{row.active ? 'Active' : 'Disabled'}</td><td><button className="text-button" onClick={() => void update(row, { active: !row.active })}>{row.active ? 'Deactivate' : 'Activate'}</button>{' · '}<button className="text-button" onClick={() => void update(row, { role: row.role === 'ADMIN' ? 'USER' : 'ADMIN' })}>{row.role === 'ADMIN' ? 'Make user' : 'Make admin'}</button></td></tr>)}</tbody></table></div></main>
+  return <main className="page"><p><Link to="/admin">Administration</Link></p><h1>Users</h1>{error && <p className="error-text">{error}</p>}<div className="table-scroll"><table className="data-table admin-table"><thead><tr><th>Username</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td>{row.username}</td><td><span className={`role-tag role-${row.role.toLowerCase()}`}>{row.role}</span></td><td><TableValue column="status" value={row.active ? 'active' : 'disabled'} /></td><td><button className="text-button" onClick={() => void update(row, { active: !row.active })}>{row.active ? 'Deactivate' : 'Activate'}</button>{' · '}<button className="text-button" onClick={() => void update(row, { role: row.role === 'ADMIN' ? 'USER' : 'ADMIN' })}>{row.role === 'ADMIN' ? 'Make user' : 'Make admin'}</button></td></tr>)}</tbody></table></div></main>
 }
 
 function InvitationPage() {
@@ -210,7 +279,7 @@ function App() {
     <Route path="/" element={<GamePage user={user} />} />
     <Route path="/login" element={user ? <Navigate to="/" /> : <AuthPage mode="login" onAuth={onAuth} />} />
     <Route path="/register" element={user ? <Navigate to="/" /> : <AuthPage mode="register" onAuth={onAuth} />} />
-    <Route path="/stats" element={<DataPage title="Statistics" endpoint="/stats/me" />} />
+    <Route path="/stats" element={<StatisticsPage />} />
     <Route path="/leagues" element={<DataPage title="Leagues" endpoint="/leagues" />} />
     <Route path="/leagues/:id" element={<LeaguePage user={user} />} />
     <Route path="/leaderboard" element={<DataPage title="Global leaderboard" endpoint="/leaderboard/global" />} />

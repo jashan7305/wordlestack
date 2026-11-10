@@ -1,91 +1,47 @@
 # WordleStack
 
-WordleStack is a self-hosted daily Wordle competition for private Leagues. Players get one game per official NYT puzzle date; that result is shared across every League and counted once in personal and global statistics.
+WordleStack is a self-hosted daily Wordle competition. Play the daily puzzle, compare results with friends, and compete in private Leagues.
 
-## Architecture
+## Setup
 
-- FastAPI modular monolith, SQLAlchemy 2, PostgreSQL, and Alembic.
-- React, TypeScript, Vite, and Tailwind CSS v4 frontend.
-- One application container serves the compiled frontend and JSON API; PostgreSQL stores accounts, puzzles, games, guesses, Leagues, memberships, invitations, and statistics.
-- The app retrieves the official puzzle from the NYT daily endpoint and stores it by the provider's `print_date`. A PostgreSQL advisory lock coordinates periodic synchronization between app workers.
-- The backend scores guesses and games. The frontend never receives the answer until the game is complete.
-- Authentication and invitation lookup endpoints have per-IP request limits in the app process. If you run multiple app workers, enforce the same limits at a shared reverse proxy.
+1. Install Docker and Docker Compose.
+2. Copy `.env.example` to `.env`:
+
+   ```sh
+   cp .env.example .env
+   ```
+
+3. Edit `.env`. Set a strong, unique value for `DB_PASSWORD`, `SECRET_KEY`, and `ADMIN_PASSWORD`. Set `PUBLIC_URL` to the address where WordleStack will be available. For local use, the defaults are suitable after replacing the placeholder secrets.
+4. Start the application from the repository directory:
+
+   ```sh
+   docker compose up -d --build
+   ```
+
+5. Open <http://localhost:8002> (or the address configured for your deployment) and sign in with the administrator username and password from `.env`.
+
+The administrator account is created on first startup. Changing its credentials in `.env` later does not change the existing account. Your data is kept in a Docker volume when you stop the application with `docker compose down`.
 
 ## Features
 
-Daily Wordle gameplay, USER and ADMIN roles, cookie authentication, League memberships, daily and overall League boards, global standings, guess history, personal statistics, and invitation links. Practice mode and configurable answers are not part of this release.
+- **Daily Wordle:** Play the official daily five-letter puzzle in the familiar six-guess format. Each person gets one game per puzzle date.
+- **Leagues:** Administrators can create private Leagues, manage members, and invite people with expiring links. A player's daily result counts in every League they belong to.
+- **Leaderboards:** Compare daily League results, overall League standings, and global points.
+- **Statistics:** Review games played, wins, streaks, guess distribution, points, and past results.
+- **Administration:** Manage user accounts and League membership from the admin pages.
 
-## Prerequisites
-
-- Docker and Docker Compose for the complete deployment.
-- Python 3.13 and uv for backend development.
-- Node.js 22 and pnpm for frontend development.
-
-## Environment
-
-Copy `.env.example` to `.env`, then set strong unique values for `DB_PASSWORD`, `SECRET_KEY`, and `ADMIN_PASSWORD`. The root `.env` is ignored by Git. `TIMEZONE` defaults to `Asia/Kolkata`; `PUBLIC_URL` must be the site's public base URL for invitation links; `COOKIE_SECURE=true` should be used behind HTTPS. Set `DATABASE_URL` to `postgresql+psycopg://...@localhost:5432/...` for local backend development. Compose uses the `db` hostname.
-
-## Docker deployment
+## Managing the deployment
 
 ```sh
-docker compose up -d --build
+# View service status and logs
+docker compose ps
+docker compose logs -f app
+
+# Stop the application while keeping its data
+docker compose down
+
+# Start it again
+docker compose up -d
 ```
 
-Open <http://localhost:8080>. The initial `ADMIN_USERNAME` and `ADMIN_PASSWORD` create an administrator on first startup only; changing those variables does not reset an existing account. PostgreSQL data persists in the `wordlestack_data` volume. Alembic migrations run before the app server starts.
-
-To stop the service while retaining data, run `docker compose down`. To delete persistent data as well, explicitly remove the volume with `docker compose down -v`.
-
-## Local development
-
-Start only PostgreSQL with `docker compose up -d db`.
-
-Backend:
-
-```sh
-cd backend
-uv sync
-uv run alembic upgrade head
-uv run uvicorn app.main:app --reload
-```
-
-Frontend, in a second terminal:
-
-```sh
-cd frontend
-pnpm install
-pnpm dev
-```
-
-Vite proxies `/api` to `http://localhost:8000`. API documentation is available at `/docs` while running the backend.
-
-## Database operations
-
-Run migrations with `cd backend && uv run alembic upgrade head`. Back up the Compose database with:
-
-```sh
-docker compose exec -T db pg_dump -U "$DB_USER" "$DB_NAME" > wordlestack.sql
-```
-
-Restore into an empty database with:
-
-```sh
-cat wordlestack.sql | docker compose exec -T db psql -U "$DB_USER" "$DB_NAME"
-```
-
-Set `DB_USER` and `DB_NAME` in the shell before these commands.
-
-## Quality checks
-
-```sh
-cd backend && uv run pytest && uv run ruff check . && uv run ruff format --check .
-cd frontend && pnpm test && pnpm lint && pnpm typecheck && pnpm build
-```
-
-The NYT provider is an external dependency. Previously cached puzzle dates remain available when it is offline; a date that has never been cached cannot be played until the provider responds. Guess validation uses 7,062 five-letter entries from SCOWL 2020.12.07. Its source, filtering, and license notices are documented in `backend/app/data/README.md` and `SCOWL-Copyright`. The puzzle answer itself is always from NYT.
-
-## Troubleshooting
-
-- If the app cannot connect to Postgres, check container health and ensure app configuration uses host `db` in Compose or `localhost` locally.
-- If login fails after changing admin environment values, the stored administrator password was deliberately left unchanged; sign in with the existing password.
-- If today's puzzle cannot load, check outbound access to the NYT puzzle endpoint. Cached earlier puzzle dates are not removed on provider errors.
-- For development over plain HTTP, leave `COOKIE_SECURE=false`; enable it when serving through HTTPS.
+To permanently remove the database and all saved data, run `docker compose down -v`.

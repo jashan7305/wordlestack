@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { BrowserRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { GamePage } from '../App'
+import { GamePage, GuessDistribution, TableValue } from '../App'
 
 const player = { id: 1, username: 'player', role: 'USER' as const }
 const initialGame = {
@@ -73,6 +73,7 @@ describe('daily game', () => {
     )
     expect(JSON.parse(String(submission?.[1]?.body))).toEqual({ guess: 'crane' })
     expect(document.querySelectorAll('.board .tile-g')).toHaveLength(5)
+    expect(document.querySelectorAll('.board .tile-reveal')).toHaveLength(5)
     expect((screen.getByRole('button', { name: 'Q' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
@@ -88,5 +89,19 @@ describe('daily game', () => {
       )
     })
     expect(document.querySelectorAll('.board .tile')).toHaveLength(30)
+  })
+
+  it('renders guess distribution counts as a Wordle-colored bar chart', () => {
+    render(<GuessDistribution value={{ '1': 1, '2': 3, '3': 0, '4': 1, '5': 0, '6': 1 }} />)
+    expect(screen.getByLabelText('Guess distribution').textContent).not.toContain('[object Object]')
+    expect(document.querySelectorAll('.guess-row')).toHaveLength(6)
+    expect(document.querySelector('.guess-bar-best')?.textContent).toBe('3')
+  })
+
+  it('renders JSON-string guess distribution values in leaderboard cells', () => {
+    render(<table><tbody><tr><td><TableValue column="guess_distribution" value={'{"1":0,"2":0,"3":0,"4":1,"5":0,"6":0}'} /></td></tr></tbody></table>)
+    expect(document.querySelectorAll('.guess-row')).toHaveLength(6)
+    expect(document.querySelector('.guess-row:nth-child(4) .guess-bar')?.textContent).toBe('1')
+    expect(document.body.textContent).not.toContain('{"1":0')
   })
 })
