@@ -8,7 +8,7 @@ services:
     restart: unless-stopped
 
     ports:
-      - "8080:8000"
+      - "8002:8000"
 
     environment:
       APP_NAME: WordleStack
@@ -21,14 +21,23 @@ services:
 
       ADMIN_USERNAME: ${ADMIN_USERNAME}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8002}
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8002}
 
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   db:
-    ports:
-      - "127.0.0.1:5432:5432"
+    # ports:
+    #   - "127.0.0.1:5432:5432"
     image: postgres:18
     container_name: wordlestack-db
     restart: unless-stopped

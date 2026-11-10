@@ -37,6 +37,9 @@ COPY --from=frontend-builder /frontend/dist ./static
 
 ENV PATH="/app/.venv/bin:$PATH"
 
+RUN useradd --system --uid 10001 --create-home wordlestack && chown -R wordlestack:wordlestack /app
+USER wordlestack
+
 EXPOSE 8000
 
 CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
