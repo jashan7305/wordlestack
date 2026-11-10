@@ -24,3 +24,7 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# Agents
+.agents
+AGENTS.md
